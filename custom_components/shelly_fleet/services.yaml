@@ -1,0 +1,68 @@
+set_feature:
+  name: Set feature
+  description: Enable or disable a device-level feature on a single Shelly device.
+  fields:
+    device_id:
+      name: Device ID
+      description: The Shelly device id, as shown in the Shelly Fleet panel table.
+      required: true
+      selector:
+        text:
+    feature:
+      name: Feature
+      description: Which device-level feature to toggle.
+      required: true
+      selector:
+        select:
+          options:
+            - eco_mode
+            - cloud
+            - mqtt
+            - ble
+            - discoverable
+    value:
+      name: Enabled
+      description: Whether the feature should be enabled.
+      required: true
+      selector:
+        boolean:
+
+batch_set_feature:
+  name: Batch set feature
+  description: Enable or disable a device-level feature across multiple Shelly devices at once.
+  fields:
+    device_ids:
+      name: Device IDs
+      description: List of Shelly device ids to apply the change to.
+      required: true
+      selector:
+        object:
+    feature:
+      name: Feature
+      description: Which device-level feature to toggle.
+      required: true
+      selector:
+        select:
+          options:
+            - eco_mode
+            - cloud
+            - mqtt
+            - ble
+            - discoverable
+    value:
+      name: Enabled
+      description: Whether the feature should be enabled.
+      required: true
+      selector:
+        boolean:
+
+reboot:
+  name: Reboot device
+  description: Reboot a single Shelly device.
+  fields:
+    device_id:
+      name: Device ID
+      description: The Shelly device id.
+      required: true
+      selector:
+        text:

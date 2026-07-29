@@ -1,0 +1,8 @@
+{
+  "name": "Shelly Fleet Manager",
+  "render_readme": true,
+  "homeassistant": "2024.8.0",
+  "zip_release": false,
+  "filename": "shelly_fleet.zip",
+  "content_in_root": false
+}
