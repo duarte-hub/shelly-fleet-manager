@@ -210,3 +210,13 @@ async def create_schedule(client: ShellyRpcClient, config: dict[str, Any]) -> An
 
 async def delete_schedule(client: ShellyRpcClient, schedule_id: int) -> Any:
     return await client.call("Schedule.Delete", {"id": schedule_id})
+
+
+async def zigbee_clear(client: ShellyRpcClient) -> Any:
+    """Clear the device's Zigbee network state (leave/forget pairing).
+
+    Gen3+ dual-protocol devices expose this as ``Shelly.ZigbeeClear`` rather
+    than under the ``Zigbee.`` namespace; devices without Zigbee hardware
+    will reject it with an RPC error.
+    """
+    return await client.call("Shelly.ZigbeeClear")

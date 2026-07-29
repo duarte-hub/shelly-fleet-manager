@@ -56,6 +56,44 @@ batch_set_feature:
       selector:
         boolean:
 
+apply_config:
+  name: Apply config
+  description: Apply several device-level feature settings to a single Shelly device in one call.
+  fields:
+    device_id:
+      name: Device ID
+      description: The Shelly device id, as shown in the Shelly Fleet panel table.
+      required: true
+      selector:
+        text:
+    config:
+      name: Config
+      description: >-
+        Map of feature name to true/false, e.g. {eco_mode: true, mqtt: false}.
+        Keys: eco_mode, cloud, mqtt, ble, discoverable.
+      required: true
+      selector:
+        object:
+
+batch_apply_config:
+  name: Batch apply config
+  description: Apply the same set of device-level feature settings to multiple Shelly devices at once.
+  fields:
+    device_ids:
+      name: Device IDs
+      description: List of Shelly device ids to apply the config to.
+      required: true
+      selector:
+        object:
+    config:
+      name: Config
+      description: >-
+        Map of feature name to true/false, e.g. {eco_mode: true, mqtt: false}.
+        Keys: eco_mode, cloud, mqtt, ble, discoverable.
+      required: true
+      selector:
+        object:
+
 reboot:
   name: Reboot device
   description: Reboot a single Shelly device.
@@ -66,3 +104,27 @@ reboot:
       required: true
       selector:
         text:
+
+zigbee_clear:
+  name: Clear Zigbee network
+  description: >-
+    Clear a device's Zigbee network state (leave/forget pairing). Only
+    applies to Gen3+ dual-protocol devices with Zigbee hardware.
+  fields:
+    device_id:
+      name: Device ID
+      description: The Shelly device id.
+      required: true
+      selector:
+        text:
+
+batch_zigbee_clear:
+  name: Batch clear Zigbee network
+  description: Clear the Zigbee network state on multiple devices at once.
+  fields:
+    device_ids:
+      name: Device IDs
+      description: List of Shelly device ids.
+      required: true
+      selector:
+        object:

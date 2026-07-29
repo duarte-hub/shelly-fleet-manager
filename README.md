@@ -21,14 +21,21 @@ firmware fleet updates and schedules — all editable in bulk from one table.
 
 ## Current status: Phase 1
 
-- [x] Add devices by IP, or discover them via mDNS network scan
+- [x] Add devices by IP, or discover them via mDNS network scan — with an
+      **Add All** button to register every discovered device in one click
 - [x] Single-page table: one row per device, live status polling
 - [x] Inline-editable device name (just type in the Name column)
 - [x] Per-row toggles for Eco Mode / Cloud / MQTT / BLE / Discoverable
-- [x] Multi-select rows + batch toolbar: enable/disable a feature, reboot, or
-      remove across every selected device at once
+- [x] Multi-select rows + batch toolbar: quick enable/disable a single
+      feature, or open **Bulk Apply…** to set several features at once
+      (per feature: no change / enable / disable) across the whole selection
+- [x] **Export Config** / **Import Config**: download the fleet's editable
+      settings as JSON, edit offline, and re-apply per-device or in bulk
+- [x] Reboot and **Clear Zigbee network** (`Shelly.ZigbeeClear`, Gen3+
+      dual-protocol devices only), per-device or batched across a selection
 - [x] HA services (`shelly_fleet.set_feature`, `.batch_set_feature`,
-      `.reboot`) so automations/scripts can drive the same actions
+      `.apply_config`, `.batch_apply_config`, `.reboot`, `.zigbee_clear`,
+      `.batch_zigbee_clear`) so automations/scripts can drive the same actions
 - [ ] Phase 2: firmware fleet view + one-click OTA updates across devices
 - [ ] Phase 3: schedules (list/create/delete) per device
 
@@ -60,6 +67,16 @@ Open the **Shelly Fleet** panel → **Add Device** → either click **Scan
 Network** (mDNS discovery) and add a found device with one click, or enter its
 IP address manually. If the device has local login enabled, supply the
 username/password — otherwise leave them blank.
+
+## Branding
+
+The panel header icon (`custom_components/shelly_fleet/www/logo.svg`) is an
+original placeholder, not Shelly's trademarked logo — this is an unofficial,
+community project with no affiliation to Shelly/Allterco, and shipping their
+brand assets in a third-party HACS repo isn't something to do without their
+permission. If you have rights to use the real logo, drop your own image over
+`www/logo.svg` (same filename) and it'll show up automatically; no code
+changes needed.
 
 ## Security notes
 

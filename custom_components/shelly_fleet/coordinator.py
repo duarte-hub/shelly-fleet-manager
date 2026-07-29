@@ -25,6 +25,7 @@ from .const import (
     FEATURE_DISCOVERABLE,
     FEATURE_ECO_MODE,
     FEATURE_MQTT,
+    TOGGLE_FEATURES,
 )
 from .store import DeviceEntry, DeviceStore
 
@@ -114,11 +115,8 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "ble": bool(ble_cfg.get("enable", False)),
         }
 
-    async def async_set_feature(self, device_id: str, feature: str, value: bool) -> None:
-        entry = self.store.get(device_id)
-        if entry is None:
-            raise KeyError(device_id)
-        client = self.client_for(entry)
+    @staticmethod
+    async def _apply_feature(client: rpc.ShellyRpcClient, feature: str, value: bool) -> None:
         if feature == FEATURE_ECO_MODE:
             await rpc.set_sys_config(client, {"device": {"eco_mode": value}})
         elif feature == FEATURE_DISCOVERABLE:
@@ -132,19 +130,78 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         else:
             raise ValueError(f"Unknown feature: {feature}")
 
-    async def async_rename(self, device_id: str, name: str) -> None:
+    def _entry_or_raise(self, device_id: str) -> DeviceEntry:
         entry = self.store.get(device_id)
         if entry is None:
             raise KeyError(device_id)
+        return entry
+
+    async def async_set_feature(self, device_id: str, feature: str, value: bool) -> None:
+        client = self.client_for(self._entry_or_raise(device_id))
+        await self._apply_feature(client, feature, value)
+
+    async def async_apply_config(self, device_id: str, config: dict[str, Any]) -> None:
+        """Apply a partial config (any of the toggle features, and/or a new
+        name) to one device in a single client session, so a digest-auth
+        challenge is only negotiated once per device."""
+        entry = self._entry_or_raise(device_id)
         client = self.client_for(entry)
+
+        name = config.get("name")
+        if name:
+            await rpc.set_sys_config(client, {"device": {"name": name}})
+            await self.store.async_update(device_id, {"name": name})
+
+        for feature in TOGGLE_FEATURES:
+            if feature in config:
+                await self._apply_feature(client, feature, bool(config[feature]))
+
+    async def async_rename(self, device_id: str, name: str) -> None:
+        client = self.client_for(self._entry_or_raise(device_id))
         await rpc.set_sys_config(client, {"device": {"name": name}})
         await self.store.async_update(device_id, {"name": name})
 
     async def async_reboot(self, device_id: str) -> None:
-        entry = self.store.get(device_id)
-        if entry is None:
-            raise KeyError(device_id)
-        await rpc.reboot(self.client_for(entry))
+        await rpc.reboot(self.client_for(self._entry_or_raise(device_id)))
+
+    async def async_zigbee_clear(self, device_id: str) -> None:
+        await rpc.zigbee_clear(self.client_for(self._entry_or_raise(device_id)))
+
+    async def async_add_devices(
+        self, devices: list[dict[str, Any]]
+    ) -> dict[str, dict[str, Any]]:
+        """Probe and register multiple devices (used by discovery's Add All).
+
+        Returns a per-ip result dict so the panel can report which ones
+        failed without aborting the whole batch.
+        """
+        results: dict[str, dict[str, Any]] = {}
+        for device in devices:
+            ip = device["ip"]
+            client = rpc.ShellyRpcClient(
+                self._session, ip, device.get("username"), device.get("password")
+            )
+            try:
+                info = await rpc.get_device_info(client)
+            except (rpc.ShellyConnectionError, rpc.ShellyRpcError, rpc.ShellyAuthRequired) as err:
+                results[ip] = {"ok": False, "error": str(err)}
+                continue
+
+            device_id = info.get("id")
+            if not device_id:
+                results[ip] = {"ok": False, "error": "Device did not return an id"}
+                continue
+
+            entry: DeviceEntry = {"id": device_id, "ip": ip, "name": device.get("name") or device_id}
+            if device.get("username"):
+                entry["username"] = device["username"]
+            if device.get("password"):
+                entry["password"] = device["password"]
+
+            await self.store.async_add(entry)
+            results[ip] = {"ok": True, "id": device_id}
+
+        return results
 
     async def async_shutdown(self) -> None:
         await self._session.close()

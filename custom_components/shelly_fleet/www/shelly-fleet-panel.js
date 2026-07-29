@@ -15,6 +15,7 @@ const FEATURES = [
 ];
 
 const POLL_MS = 15000;
+const STATIC_BASE = "/shelly_fleet_static";
 
 class ShellyFleetPanel extends HTMLElement {
   constructor() {
@@ -26,9 +27,12 @@ class ShellyFleetPanel extends HTMLElement {
     this._showAddDialog = false;
     this._candidates = null; // null = not scanned yet
     this._scanning = false;
+    this._addingAll = false;
+    this._showBulkApply = false;
     this._busy = new Set(); // device ids with an in-flight action
     this._error = null;
     this._root = this.attachShadow({ mode: "open" });
+    this._fileInput = null;
   }
 
   set hass(hass) {
@@ -170,6 +174,142 @@ class ShellyFleetPanel extends HTMLElement {
     await this._refresh();
   }
 
+  async _zigbeeClear(deviceId) {
+    if (!confirm("Clear this device's Zigbee network state? It will forget its current pairing.")) return;
+    this._busy.add(deviceId);
+    this._render();
+    try {
+      await this._callWS({ type: "shelly_fleet/zigbee_clear", device_id: deviceId });
+    } catch (err) {
+      this._error = `Zigbee clear failed: ${err.message || err}`;
+    }
+    this._busy.delete(deviceId);
+    this._render();
+  }
+
+  async _batchZigbeeClear() {
+    const ids = [...this._selected];
+    if (ids.length === 0) return;
+    if (!confirm(`Clear the Zigbee network state on ${ids.length} device(s)?`)) return;
+    ids.forEach((id) => this._busy.add(id));
+    this._render();
+    try {
+      const result = await this._callWS({ type: "shelly_fleet/batch_zigbee_clear", device_ids: ids });
+      const failed = Object.entries(result.results || {}).filter(([, r]) => !r.ok);
+      if (failed.length > 0) {
+        this._error = `Zigbee clear failed for ${failed.length} device(s)`;
+      }
+    } catch (err) {
+      this._error = `Batch Zigbee clear failed: ${err.message || err}`;
+    }
+    ids.forEach((id) => this._busy.delete(id));
+    this._render();
+  }
+
+  _exportConfig() {
+    const ids = this._selected.size > 0 ? this._selected : new Set(this._devices.map((d) => d.id));
+    const devices = this._devices
+      .filter((d) => ids.has(d.id))
+      .map((d) => ({
+        id: d.id,
+        ip: d.ip,
+        name: d.name,
+        eco_mode: d.eco_mode,
+        cloud: d.cloud,
+        mqtt: d.mqtt,
+        ble: d.ble,
+        discoverable: d.discoverable,
+      }));
+    const blob = new Blob([JSON.stringify({ devices }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `shelly-fleet-config-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  _triggerImport() {
+    if (!this._fileInput) {
+      this._fileInput = document.createElement("input");
+      this._fileInput.type = "file";
+      this._fileInput.accept = "application/json";
+      this._fileInput.addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (file) this._importConfigFile(file);
+        this._fileInput.value = "";
+      });
+    }
+    this._fileInput.click();
+  }
+
+  async _importConfigFile(file) {
+    let parsed;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch (err) {
+      this._error = `Invalid config file: ${err.message || err}`;
+      this._render();
+      return;
+    }
+    const entries = Array.isArray(parsed) ? parsed : parsed.devices || [];
+    if (entries.length === 0) {
+      this._error = "Config file contained no devices.";
+      this._render();
+      return;
+    }
+    if (!confirm(`Apply imported config to ${entries.length} device(s)?`)) return;
+
+    const errors = [];
+    for (const entry of entries) {
+      if (!entry.id) continue;
+      const config = {};
+      for (const key of ["name", ...FEATURES.map((f) => f.key)]) {
+        if (key in entry) config[key] = entry[key];
+      }
+      try {
+        await this._callWS({
+          type: "shelly_fleet/apply_device_config",
+          device_id: entry.id,
+          config,
+        });
+      } catch (err) {
+        errors.push(`${entry.id}: ${err.message || err}`);
+      }
+    }
+    if (errors.length > 0) {
+      this._error = `Import had ${errors.length} error(s): ${errors.join("; ")}`;
+    }
+    await this._refresh();
+  }
+
+  async _submitBulkApply(config) {
+    const ids = [...this._selected];
+    if (ids.length === 0 || Object.keys(config).length === 0) {
+      this._showBulkApply = false;
+      this._render();
+      return;
+    }
+    ids.forEach((id) => this._busy.add(id));
+    this._showBulkApply = false;
+    this._render();
+    try {
+      const result = await this._callWS({
+        type: "shelly_fleet/batch_apply_config",
+        device_ids: ids,
+        config,
+      });
+      const failed = Object.entries(result.results || {}).filter(([, r]) => !r.ok);
+      if (failed.length > 0) {
+        this._error = `Bulk apply failed for ${failed.length} device(s)`;
+      }
+    } catch (err) {
+      this._error = `Bulk apply failed: ${err.message || err}`;
+    }
+    ids.forEach((id) => this._busy.delete(id));
+    await this._refresh();
+  }
+
   async _scan() {
     this._scanning = true;
     this._candidates = [];
@@ -183,6 +323,31 @@ class ShellyFleetPanel extends HTMLElement {
     }
     this._scanning = false;
     this._render();
+  }
+
+  async _addAllCandidates() {
+    const candidates = (this._candidates || []).filter((c) => c.id);
+    if (candidates.length === 0) return;
+    this._addingAll = true;
+    this._render();
+    try {
+      const result = await this._callWS({
+        type: "shelly_fleet/add_devices",
+        devices: candidates.map((c) => ({ ip: c.ip, name: c.name })),
+      });
+      const failed = Object.entries(result.results || {}).filter(([, r]) => !r.ok);
+      if (failed.length > 0) {
+        this._error = `${failed.length} device(s) failed to add: ${failed
+          .map(([ip, r]) => `${ip} (${r.error})`)
+          .join(", ")}`;
+      }
+      this._showAddDialog = false;
+      this._candidates = null;
+    } catch (err) {
+      this._error = `Add all failed: ${err.message || err}`;
+    }
+    this._addingAll = false;
+    await this._refresh();
   }
 
   async _addDevice({ ip, name, username, password }) {
@@ -244,6 +409,7 @@ class ShellyFleetPanel extends HTMLElement {
         ${FEATURES.map((f) => `<td>${this._renderFeatureCell(device, f)}</td>`).join("")}
         <td class="actions">
           <button data-action="reboot" data-id="${escapeAttr(device.id)}" ${!device.online ? "disabled" : ""} title="Reboot">⟳</button>
+          <button data-action="zigbee-clear" data-id="${escapeAttr(device.id)}" ${!device.online ? "disabled" : ""} title="Clear Zigbee network">⎌</button>
           <button data-action="remove" data-id="${escapeAttr(device.id)}" title="Remove">✕</button>
         </td>
       </tr>`;
@@ -260,6 +426,11 @@ class ShellyFleetPanel extends HTMLElement {
             <button data-action="scan" ${this._scanning ? "disabled" : ""}>
               ${this._scanning ? "Scanning…" : "Scan Network"}
             </button>
+            ${candidates && candidates.length > 0
+              ? `<button class="primary" data-action="add-all" ${this._addingAll ? "disabled" : ""}>
+                  ${this._addingAll ? "Adding…" : `Add All (${candidates.length})`}
+                </button>`
+              : ""}
           </div>
           ${candidates === null
             ? ""
@@ -291,6 +462,34 @@ class ShellyFleetPanel extends HTMLElement {
       </div>`;
   }
 
+  _renderBulkApplyDialog() {
+    if (!this._showBulkApply) return "";
+    return `
+      <div class="dialog-backdrop" data-action="close-bulk-apply">
+        <div class="dialog" data-stop>
+          <h2>Bulk Apply (${this._selected.size} device${this._selected.size === 1 ? "" : "s"})</h2>
+          <p class="hint">Leave a feature on "No change" to skip it. Applies to every selected device.</p>
+          <form data-action="submit-bulk-apply">
+            ${FEATURES.map(
+              (f) => `
+              <label class="bulk-row">
+                <span>${f.label}</span>
+                <select name="${f.key}">
+                  <option value="">No change</option>
+                  <option value="true">Enable</option>
+                  <option value="false">Disable</option>
+                </select>
+              </label>`
+            ).join("")}
+            <div class="dialog-actions">
+              <button type="button" data-action="close-bulk-apply">Cancel</button>
+              <button type="submit" class="primary">Apply</button>
+            </div>
+          </form>
+        </div>
+      </div>`;
+  }
+
   _render() {
     const selectedCount = this._selected.size;
     const allSelected = this._devices.length > 0 && selectedCount === this._devices.length;
@@ -299,8 +498,11 @@ class ShellyFleetPanel extends HTMLElement {
       <style>${STYLE}</style>
       <div class="panel">
         <div class="header">
+          <img class="logo" src="${STATIC_BASE}/logo.svg" alt="" />
           <h1>Shelly Fleet</h1>
           <div class="spacer"></div>
+          <button data-action="export">Export Config</button>
+          <button data-action="import">Import Config</button>
           <button data-action="refresh">Refresh</button>
           <button class="primary" data-action="open-dialog">+ Add Device</button>
         </div>
@@ -318,7 +520,9 @@ class ShellyFleetPanel extends HTMLElement {
             </select>
             <button data-action="batch-enable">Enable</button>
             <button data-action="batch-disable">Disable</button>
+            <button data-action="open-bulk-apply">Bulk Apply…</button>
             <button data-action="batch-reboot">Reboot</button>
+            <button data-action="batch-zigbee-clear">Clear Zigbee</button>
             <button class="danger" data-action="batch-remove">Remove</button>
           </div>`
           : ""}
@@ -348,6 +552,7 @@ class ShellyFleetPanel extends HTMLElement {
           </div>`}
       </div>
       ${this._renderAddDialog()}
+      ${this._renderBulkApplyDialog()}
     `;
 
     this._bindEvents();
@@ -357,6 +562,8 @@ class ShellyFleetPanel extends HTMLElement {
     const root = this._root;
 
     root.querySelector('[data-action="refresh"]')?.addEventListener("click", () => this._refresh());
+    root.querySelector('[data-action="export"]')?.addEventListener("click", () => this._exportConfig());
+    root.querySelector('[data-action="import"]')?.addEventListener("click", () => this._triggerImport());
     root.querySelector('[data-action="open-dialog"]')?.addEventListener("click", () => {
       this._showAddDialog = true;
       this._candidates = null;
@@ -375,9 +582,10 @@ class ShellyFleetPanel extends HTMLElement {
         }
       })
     );
-    root.querySelector(".dialog")?.addEventListener("click", (e) => e.stopPropagation());
+    root.querySelectorAll(".dialog").forEach((el) => el.addEventListener("click", (e) => e.stopPropagation()));
 
     root.querySelector('[data-action="scan"]')?.addEventListener("click", () => this._scan());
+    root.querySelector('[data-action="add-all"]')?.addEventListener("click", () => this._addAllCandidates());
 
     root.querySelector('[data-action="manual-add"]')?.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -424,6 +632,9 @@ class ShellyFleetPanel extends HTMLElement {
     root.querySelectorAll('[data-action="reboot"]').forEach((el) =>
       el.addEventListener("click", () => this._reboot(el.dataset.id))
     );
+    root.querySelectorAll('[data-action="zigbee-clear"]').forEach((el) =>
+      el.addEventListener("click", () => this._zigbeeClear(el.dataset.id))
+    );
     root.querySelectorAll('[data-action="remove"]').forEach((el) =>
       el.addEventListener("click", () => this._removeDevice(el.dataset.id))
     );
@@ -434,7 +645,32 @@ class ShellyFleetPanel extends HTMLElement {
     root.querySelector('[data-action="batch-enable"]')?.addEventListener("click", () => this._batchApply(true));
     root.querySelector('[data-action="batch-disable"]')?.addEventListener("click", () => this._batchApply(false));
     root.querySelector('[data-action="batch-reboot"]')?.addEventListener("click", () => this._batchReboot());
+    root.querySelector('[data-action="batch-zigbee-clear"]')?.addEventListener("click", () => this._batchZigbeeClear());
     root.querySelector('[data-action="batch-remove"]')?.addEventListener("click", () => this._batchRemove());
+
+    root.querySelector('[data-action="open-bulk-apply"]')?.addEventListener("click", () => {
+      this._showBulkApply = true;
+      this._render();
+    });
+    root.querySelectorAll('[data-action="close-bulk-apply"]').forEach((el) =>
+      el.addEventListener("click", (e) => {
+        if (e.target === el) {
+          this._showBulkApply = false;
+          this._render();
+        }
+      })
+    );
+    root.querySelector('[data-action="submit-bulk-apply"]')?.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const form = new FormData(e.target);
+      const config = {};
+      for (const f of FEATURES) {
+        const value = form.get(f.key);
+        if (value === "true") config[f.key] = true;
+        else if (value === "false") config[f.key] = false;
+      }
+      this._submitBulkApply(config);
+    });
   }
 }
 
@@ -465,6 +701,7 @@ const STYLE = `
   .panel { padding: 16px 24px 48px; max-width: 1400px; margin: 0 auto; }
   .header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
   .header h1 { font-size: 24px; font-weight: 400; margin: 0; }
+  .header .logo { width: 28px; height: 28px; }
   .spacer { flex: 1; }
   button {
     font: inherit;
@@ -584,6 +821,9 @@ const STYLE = `
   .dialog input { font: inherit; padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--primary-background-color, #fff); color: inherit; }
   .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
   .hint { color: var(--secondary-text-color, #727272); font-size: 13px; }
+  .dialog label.bulk-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; }
+  .bulk-row span { color: var(--primary-text-color, #212121); font-size: 14px; }
+  .bulk-row select { font: inherit; padding: 6px 8px; border-radius: 4px; border: 1px solid var(--divider-color, #e0e0e0); background: var(--primary-background-color, #fff); color: inherit; }
   ul.candidates { list-style: none; padding: 0; margin: 0 0 12px; max-height: 180px; overflow-y: auto; }
   ul.candidates li { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--divider-color, #eee); }
 `;
