@@ -11,6 +11,7 @@ from homeassistant.loader import async_get_integration
 from . import rpc_client as rpc
 from .const import DOMAIN, MIN_POLL_INTERVAL, TOGGLE_FEATURES
 from .discovery import async_discover_ips
+from .photos import async_attach_photo_urls
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,7 +77,9 @@ async def ws_list_devices(hass, connection, msg):
     connection.send_result(
         msg["id"],
         {
-            "devices": list(data["coordinator"].data.values()),
+            "devices": await async_attach_photo_urls(
+                hass, list(data["coordinator"].data.values())
+            ),
             # Lets the panel spot a stale cached copy of itself after an update.
             "version": str(integration.version),
         },

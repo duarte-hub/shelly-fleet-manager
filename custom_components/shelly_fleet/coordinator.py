@@ -84,21 +84,9 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
                 self._optional(rpc.get_wifi_status(client)),
             )
         except rpc.ShellyAuthRequired:
-            return {
-                "id": entry["id"],
-                "ip": entry["ip"],
-                "name": entry.get("name", entry["ip"]),
-                "online": False,
-                "error": "auth_required",
-            }
+            return self._offline(entry, "auth_required")
         except (rpc.ShellyConnectionError, rpc.ShellyRpcError) as err:
-            return {
-                "id": entry["id"],
-                "ip": entry["ip"],
-                "name": entry.get("name", entry["ip"]),
-                "online": False,
-                "error": str(err),
-            }
+            return self._offline(entry, str(err))
 
         device = sys_cfg.get("device", {})
         return {
@@ -120,6 +108,21 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "ble": bool(ble_cfg.get("enable", False)),
             "rssi": wifi_status.get("rssi"),
             "ssid": wifi_status.get("ssid"),
+        }
+
+    def _offline(self, entry: DeviceEntry, error: str) -> dict[str, Any]:
+        # Keep the last known identity so the panel can still show the right
+        # model / device icon while the device is unreachable.
+        last = (self.data or {}).get(entry["id"], {})
+        return {
+            "id": entry["id"],
+            "ip": entry["ip"],
+            "name": entry.get("name", entry["ip"]),
+            "online": False,
+            "error": error,
+            "model": last.get("model"),
+            "app": last.get("app"),
+            "gen": last.get("gen"),
         }
 
     @staticmethod

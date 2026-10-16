@@ -33,6 +33,8 @@ firmware fleet updates and schedules — all editable in bulk from one table.
       settings as JSON, edit offline, and re-apply per-device or in bulk
 - [x] Reboot and **Clear Zigbee network** (`Shelly.ZigbeeClear`, Gen3+
       dual-protocol devices only), per-device or batched across a selection
+- [x] A small picture of each device: drawn icons per device type, or your
+      own photos (see [Device pictures](#device-pictures))
 - [x] Wi-Fi signal (RSSI) column, read live from each device on every poll;
       click a device's name to open its own web UI
 - [x] **Maintenance** tab: configurable status-poll interval (or manual-only,
@@ -84,6 +86,27 @@ brand assets in a third-party HACS repo isn't something to do without their
 permission. If you have rights to use the real logo, drop your own image over
 `www/logo.svg` (same filename) and it'll show up automatically; no code
 changes needed.
+
+### Device pictures
+
+Each row shows a small picture of the device. By default these are original
+drawn icons, picked automatically from the device's model (plug, relay, Pro
+DIN-rail module, Mini, dimmer, RGBW, H&T, smoke, i4, energy meter, gateway,
+Wall Display). Shelly's product photos aren't bundled, for the same reason as
+the logo.
+
+To use your own photos instead, put image files (`.png`, `.jpg`, `.jpeg`,
+`.webp` or `.svg`) in `<config>/www/shelly_fleet/` (create the folder if needed).
+Name each file after either:
+
+- a **model code**, for every device of that model, e.g. `SNSW-001P16EU.png`
+  (hover a device's picture in the panel to see its model code)
+- a **device ID**, for one specific device, e.g. `shellyplus1pm-a8032ab12345.jpg`
+  (this wins over a model photo; the ID is shown in the same hover text)
+
+Photos show up on the panel's next refresh. That folder lives outside the
+integration, so HACS updates don't remove them. If `www/` didn't exist before,
+restart Home Assistant once so it starts serving `/local/`.
 
 ## Security notes
 

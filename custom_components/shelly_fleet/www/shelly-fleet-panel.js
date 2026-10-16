@@ -16,9 +16,70 @@ const FEATURES = [
 
 // Must match "version" in manifest.json (CI checks this). Compared against the
 // backend's version to detect a stale cached copy of this file after an update.
-const PANEL_VERSION = "0.3.1";
+const PANEL_VERSION = "0.4.0";
 
-const DAYS =["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // index = Python weekday()
+// Original drawn thumbnails per device family (not Shelly product photos —
+// see README "Branding"). Users can override with their own photos; the
+// backend reports those as device.photo_url.
+const BODY = 'fill="#f5f6f8" stroke="#aab2bd" stroke-width="1.2"';
+const TERMINAL = 'fill="#c9ced6" stroke="#8f98a3" stroke-width="0.8"';
+const LED = '<circle cx="33" cy="33" r="1.8" fill="#3db4f2"/>';
+const LABEL = '<rect x="14" y="24" width="14" height="2" rx="1" fill="#cfd4db"/><rect x="14" y="29" width="9" height="2" rx="1" fill="#cfd4db"/>';
+const TOP_TERMINALS = [13, 19, 25, 31].map((x) => `<rect x="${x}" y="11" width="4" height="5" rx="1" ${TERMINAL}/>`).join("");
+const DEVICE_ICONS = {
+  relay: `<rect x="9" y="9" width="30" height="30" rx="5" ${BODY}/>${TOP_TERMINALS}${LABEL}${LED}`,
+  mini: `<path d="M19 33v9" stroke-width="2.2" stroke-linecap="round" stroke="#e0513f"/>
+    <path d="M24 33v9" stroke-width="2.2" stroke-linecap="round" stroke="#3d7be0"/>
+    <path d="M29 33v9" stroke-width="2.2" stroke-linecap="round" stroke="#3a3f45"/>
+    <rect x="13" y="12" width="22" height="22" rx="4" ${BODY}/><rect x="17" y="21" width="10" height="2" rx="1" fill="#cfd4db"/><circle cx="30" cy="29" r="1.6" fill="#3db4f2"/>`,
+  din: `<rect x="8" y="5" width="32" height="38" rx="2" ${BODY}/>
+    <rect x="12" y="14" width="24" height="20" rx="2" fill="#ffffff" stroke="#aab2bd" stroke-width="1"/>
+    ${[14.5, 21, 27.5, 34].map((x) => `<circle cx="${x}" cy="9.5" r="2" ${TERMINAL}/><circle cx="${x}" cy="38.5" r="2" ${TERMINAL}/>`).join("")}
+    <rect x="15" y="20" width="12" height="2" rx="1" fill="#cfd4db"/><rect x="15" y="25" width="8" height="2" rx="1" fill="#cfd4db"/><circle cx="31" cy="19" r="1.6" fill="#3db4f2"/>`,
+  plug: `<rect x="8" y="8" width="32" height="32" rx="9" ${BODY}/><circle cx="24" cy="25" r="10" fill="#e9ecf0" stroke="#aab2bd" stroke-width="1"/>
+    <circle cx="20" cy="25" r="2" fill="#5b6470"/><circle cx="28" cy="25" r="2" fill="#5b6470"/><circle cx="24" cy="12.5" r="1.5" fill="#3db4f2"/>`,
+  dimmer: `<rect x="9" y="9" width="30" height="30" rx="5" ${BODY}/>${TOP_TERMINALS}
+    <circle cx="24" cy="27" r="7.5" fill="#ffffff" stroke="#8f98a3" stroke-width="1.2"/><path d="M24 27l4.5-4.5" stroke="#5b6470" stroke-width="1.8" stroke-linecap="round"/><circle cx="34" cy="35" r="1.5" fill="#3db4f2"/>`,
+  led: `<rect x="9" y="9" width="30" height="30" rx="5" ${BODY}/>${TOP_TERMINALS}
+    <circle cx="16" cy="27" r="2.6" fill="#e5484d"/><circle cx="21.3" cy="27" r="2.6" fill="#30a46c"/><circle cx="26.6" cy="27" r="2.6" fill="#3e63dd"/><circle cx="32" cy="27" r="2.6" fill="#f5d90a" stroke="#c9b000" stroke-width="0.6"/>`,
+  ht: `<rect x="10" y="7" width="28" height="34" rx="7" ${BODY}/><rect x="14.5" y="13" width="19" height="13" rx="2" fill="#2b3138"/>
+    <text x="24" y="22.5" text-anchor="middle" font-family="sans-serif" font-size="7.5" font-weight="600" fill="#ffffff">21°</text>
+    <path d="M24 30.5c-1.6 2.2-2.6 3.6-2.6 4.8a2.6 2.6 0 0 0 5.2 0c0-1.2-1-2.6-2.6-4.8z" fill="#3db4f2"/>`,
+  smoke: `<circle cx="24" cy="24" r="17" ${BODY}/><circle cx="24" cy="24" r="12.5" fill="none" stroke="#c9ced6" stroke-width="2.4" stroke-dasharray="3 2.4"/>
+    <circle cx="24" cy="24" r="7" fill="#ffffff" stroke="#aab2bd" stroke-width="1"/><circle cx="24" cy="24" r="1.8" fill="#e5484d"/>`,
+  input: `<rect x="9" y="9" width="30" height="30" rx="5" ${BODY}/>${TOP_TERMINALS}
+    <text x="24" y="31" text-anchor="middle" font-family="sans-serif" font-size="10" font-weight="700" fill="#5b6470">i4</text>`,
+  meter: `<path d="M22 30c4 0 4 3 6 3" stroke="#3a3f45" stroke-width="1.6" fill="none"/>
+    <rect x="5" y="12" width="19" height="24" rx="3" ${BODY}/><rect x="8.5" y="16" width="12" height="7" rx="1.2" fill="#2b3138"/>
+    <rect x="9" y="27" width="8" height="2" rx="1" fill="#cfd4db"/><circle cx="20" cy="31" r="1.4" fill="#3db4f2"/>
+    <path d="M35.5 18.5a8 8 0 1 1-4.2 1.3" fill="none" stroke="#3a3f45" stroke-width="3.6" stroke-linecap="round"/>`,
+  gateway: `<path d="M18.5 16.5a8 8 0 0 1 11 0M15 13a13 13 0 0 1 18 0" fill="none" stroke="#3db4f2" stroke-width="2" stroke-linecap="round"/>
+    <rect x="10" y="21" width="28" height="18" rx="5" ${BODY}/><rect x="15" y="28" width="12" height="2" rx="1" fill="#cfd4db"/><circle cx="32" cy="29" r="1.6" fill="#3db4f2"/>`,
+  display: `<rect x="6" y="9" width="36" height="30" rx="3.5" fill="#2b3138"/><rect x="9" y="12" width="30" height="24" rx="1.5" fill="#3a6ea5"/>
+    <text x="24" y="27" text-anchor="middle" font-family="sans-serif" font-size="9" font-weight="600" fill="#ffffff">12:00</text>`,
+  generic: `<rect x="9" y="9" width="30" height="30" rx="5" ${BODY}/>${LABEL}${LED}`,
+};
+
+/** Map a device to a DEVICE_ICONS family from its RPC app name / model code. */
+function deviceFamily(device) {
+  const app = String(device.app || "").toLowerCase();
+  const model = String(device.model || "").toUpperCase();
+  if (app.includes("display") || model.startsWith("SAWD")) return "display";
+  if (app.includes("plug") || /^(SNPL|S\dPL)/.test(model)) return "plug";
+  if (app.includes("smoke")) return "smoke";
+  if (/(^|plus)ht|htg\d/.test(app) || /^(SNSN-0013|S\dSN-0U12)/.test(model)) return "ht";
+  if (/gw|gateway/.test(app) || /^(SNGW|S\dGW)/.test(model)) return "gateway";
+  if (/em|pmmini/.test(app) || /^(SPEM|SNEM|S\dEM|SNPM|S\dPM)/.test(model)) return "meter";
+  if (app.startsWith("pro") || model.startsWith("SP")) return "din";
+  if (app.includes("i4") || /^(SNSN|S\dSN)-0024/.test(model)) return "input";
+  if (/rgb|led/.test(app) || model.startsWith("SNDC-0D4")) return "led";
+  if (/dimmer|dali|010v/.test(app) || /^(SNDM|S\dDM|SNDC)/.test(model)) return "dimmer";
+  if (/mini|uni/.test(app) || /^(SNSW|S\dSW)-\w+8(EU|US)$/.test(model)) return "mini";
+  if (app.startsWith("plus") || /\d(pm)?g\d$/.test(app) || /^(SNSW|S\dSW)/.test(model)) return "relay";
+  return "generic";
+}
+
+const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // index = Python weekday()
 
 // Device-poll interval choices (seconds) offered on the Maintenance tab; 0 = manual only.
 const POLL_INTERVAL_PRESETS = [0, 5, 10, 15, 30, 60, 300, 900, 3600];
@@ -503,6 +564,16 @@ class ShellyFleetPanel extends HTMLElement {
       </span>`;
   }
 
+  _renderThumb(device) {
+    // Model code and device ID are the two names a custom photo file can use.
+    const model = [device.app, device.model && `(${device.model})`].filter(Boolean).join(" ") || "Unknown model";
+    const title = `${model}\nID: ${device.id}`;
+    const content = device.photo_url
+      ? `<img src="${escapeAttr(device.photo_url)}" alt="" loading="lazy" />`
+      : `<svg viewBox="0 0 48 48" aria-hidden="true">${DEVICE_ICONS[deviceFamily(device)]}</svg>`;
+    return `<span class="device-thumb" title="${escapeAttr(title)}">${content}</span>`;
+  }
+
   _renderRow(device) {
     const busy = this._busy.has(device.id);
     const statusDot = device.online ? "online" : "offline";
@@ -511,6 +582,7 @@ class ShellyFleetPanel extends HTMLElement {
       <tr class="${busy ? "busy" : ""}">
         <td><input type="checkbox" data-action="select" data-id="${escapeAttr(device.id)}" ${checked ? "checked" : ""} /></td>
         <td><span class="dot ${statusDot}" title="${escapeAttr(device.online ? "Online" : device.error || "Offline")}"></span></td>
+        <td class="thumb-cell">${this._renderThumb(device)}</td>
         <td>
           ${this._editingName === device.id
             ? `<input class="name-input" type="text" data-action="rename" data-id="${escapeAttr(device.id)}"
@@ -797,6 +869,7 @@ class ShellyFleetPanel extends HTMLElement {
               <thead>
                 <tr>
                   <th><input type="checkbox" data-action="select-all" ${allSelected ? "checked" : ""} /></th>
+                  <th></th>
                   <th></th>
                   <th>Name</th>
                   <th>IP</th>
@@ -1251,6 +1324,15 @@ const STYLE = `
   .rssi-1 .bars i.on { background: var(--error-color, #db4437); }
   .rssi-2 .bars i.on { background: #ff9800; }
   .rssi-3 .bars i.on, .rssi-4 .bars i.on { background: #4caf50; }
+
+  td.thumb-cell { padding-right: 0; width: 1px; }
+  .device-thumb {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 34px; height: 34px; border-radius: 6px; overflow: hidden;
+    background: var(--secondary-background-color, #f0f0f0); vertical-align: middle;
+  }
+  .device-thumb svg { width: 30px; height: 30px; }
+  .device-thumb img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 
   .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
   .dot.online { background: #4caf50; }
