@@ -6,6 +6,7 @@ import logging
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.loader import async_get_integration
 
 from . import rpc_client as rpc
 from .const import DOMAIN, MIN_POLL_INTERVAL, TOGGLE_FEATURES
@@ -71,7 +72,15 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
 @websocket_api.async_response
 async def ws_list_devices(hass, connection, msg):
     data = _get_data(hass)
-    connection.send_result(msg["id"], {"devices": list(data["coordinator"].data.values())})
+    integration = await async_get_integration(hass, DOMAIN)
+    connection.send_result(
+        msg["id"],
+        {
+            "devices": list(data["coordinator"].data.values()),
+            # Lets the panel spot a stale cached copy of itself after an update.
+            "version": str(integration.version),
+        },
+    )
 
 
 @websocket_api.require_admin

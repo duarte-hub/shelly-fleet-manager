@@ -19,6 +19,17 @@ jobs:
           category: integration
           ignore: brands
 
+  version-sync:
+    name: Panel version matches manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          manifest=$(jq -r .version custom_components/shelly_fleet/manifest.json)
+          panel=$(sed -nE 's/^const PANEL_VERSION = "([^"]+)";/\1/p' custom_components/shelly_fleet/www/shelly-fleet-panel.js)
+          echo "manifest=$manifest panel=$panel"
+          [ "$manifest" = "$panel" ] || { echo "::error::Bump PANEL_VERSION in shelly-fleet-panel.js to $manifest"; exit 1; }
+
   hassfest:
     name: Hassfest validation
     runs-on: ubuntu-latest

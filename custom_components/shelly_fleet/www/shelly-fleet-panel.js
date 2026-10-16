@@ -14,7 +14,11 @@ const FEATURES = [
   { key: "discoverable", label: "Discoverable" },
 ];
 
-const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // index = Python weekday()
+// Must match "version" in manifest.json (CI checks this). Compared against the
+// backend's version to detect a stale cached copy of this file after an update.
+const PANEL_VERSION = "0.3.1";
+
+const DAYS =["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]; // index = Python weekday()
 
 // Device-poll interval choices (seconds) offered on the Maintenance tab; 0 = manual only.
 const POLL_INTERVAL_PRESETS = [0, 5, 10, 15, 30, 60, 300, 900, 3600];
@@ -29,6 +33,7 @@ class ShellyFleetPanel extends HTMLElement {
     super();
     this._hass = null;
     this._devices = [];
+    this._backendVersion = null;
     this._maintenance = null; // { poll_interval, time_zone, reboot_schedules }
     this._tab = "devices"; // "devices" | "maintenance"
     this._scheduleDraft = null; // reboot schedule being created/edited in the dialog
@@ -79,6 +84,7 @@ class ShellyFleetPanel extends HTMLElement {
         this._callWS({ type: "shelly_fleet/get_maintenance" }),
       ]);
       this._devices = devices.devices || [];
+      this._backendVersion = devices.version || null;
       this._maintenance = maintenance;
     } catch (err) {
       this._error = err.message || String(err);
@@ -817,6 +823,7 @@ class ShellyFleetPanel extends HTMLElement {
         <div class="header">
           <img class="logo" src="${STATIC_BASE}/logo.svg" alt="" />
           <h1>Shelly Fleet</h1>
+          <span class="version" title="Shelly Fleet Manager version">v${PANEL_VERSION}</span>
           <div class="spacer"></div>
           ${onDevices
             ? `<button data-action="export">Export Config</button>
@@ -832,6 +839,14 @@ class ShellyFleetPanel extends HTMLElement {
           <button class="tab ${onDevices ? "active" : ""}" data-action="tab" data-tab="devices">Devices</button>
           <button class="tab ${!onDevices ? "active" : ""}" data-action="tab" data-tab="maintenance">Maintenance</button>
         </div>
+
+        ${this._backendVersion && this._backendVersion !== PANEL_VERSION
+          ? `<div class="warning-banner">
+              This page is running panel v${escapeHtml(PANEL_VERSION)}, but the installed integration is
+              v${escapeHtml(this._backendVersion)}. Your browser is using a cached copy — hard refresh
+              (Ctrl/Cmd+Shift+R) or clear this site's data to load the new version.
+            </div>`
+          : ""}
 
         ${this._error ? `<div class="error-banner">${escapeHtml(this._error)} <button data-action="dismiss-error">✕</button></div>` : ""}
 
@@ -1124,6 +1139,14 @@ const STYLE = `
     justify-content: space-between;
     align-items: center;
   }
+  .warning-banner {
+    background: var(--warning-color, #ff9800);
+    color: var(--text-primary-color, #fff);
+    padding: 8px 16px;
+    border-radius: 4px;
+    margin-bottom: 12px;
+  }
+  .header .version { color: var(--secondary-text-color, #727272); font-size: 13px; align-self: flex-end; padding-bottom: 4px; }
   .error-banner button { background: transparent; border: none; color: inherit; font-size: 16px; }
 
   .batch-bar {
