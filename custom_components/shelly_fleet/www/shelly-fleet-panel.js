@@ -23,6 +23,7 @@ class ShellyFleetPanel extends HTMLElement {
     this._hass = null;
     this._devices = [];
     this._selected = new Set();
+    this._editingName = null; // device id whose name is being edited
     this._batchFeature = FEATURES[0].key;
     this._showAddDialog = false;
     this._candidates = null; // null = not scanned yet
@@ -68,6 +69,8 @@ class ShellyFleetPanel extends HTMLElement {
     } catch (err) {
       this._error = err.message || String(err);
     }
+    // Don't clobber an in-progress rename; the blur handler re-renders.
+    if (this._editingName) return;
     this._render();
   }
 
@@ -399,8 +402,15 @@ class ShellyFleetPanel extends HTMLElement {
         <td><input type="checkbox" data-action="select" data-id="${escapeAttr(device.id)}" ${checked ? "checked" : ""} /></td>
         <td><span class="dot ${statusDot}" title="${escapeAttr(device.online ? "Online" : device.error || "Offline")}"></span></td>
         <td>
-          <input class="name-input" type="text" data-action="rename" data-id="${escapeAttr(device.id)}"
-                 value="${escapeAttr(device.name || "")}" ${!device.online ? "disabled" : ""} />
+          ${this._editingName === device.id
+            ? `<input class="name-input" type="text" data-action="rename" data-id="${escapeAttr(device.id)}"
+                      value="${escapeAttr(device.name || "")}" />`
+            : `<span class="name-cell">
+                 <a class="name-link" href="http://${escapeAttr(device.ip || "")}" target="_blank" rel="noopener noreferrer"
+                    title="Open device web UI">${escapeHtml(device.name || device.ip || device.id)}</a>
+                 <button class="name-edit" data-action="edit-name" data-id="${escapeAttr(device.id)}"
+                         ${!device.online ? "disabled" : ""} title="Rename">✎</button>
+               </span>`}
         </td>
         <td>${escapeHtml(device.ip || "")}</td>
         <td>${escapeHtml(device.model || "-")}</td>
@@ -617,16 +627,34 @@ class ShellyFleetPanel extends HTMLElement {
       )
     );
 
+    root.querySelectorAll('[data-action="edit-name"]').forEach((el) =>
+      el.addEventListener("click", () => {
+        this._editingName = el.dataset.id;
+        this._render();
+      })
+    );
+
     root.querySelectorAll('[data-action="rename"]').forEach((el) => {
+      let cancelled = false;
       el.addEventListener("keydown", (e) => {
         if (e.key === "Enter") el.blur();
-      });
-      el.addEventListener("blur", (e) => {
-        const device = this._devices.find((d) => d.id === el.dataset.id);
-        if (device && e.target.value !== device.name) {
-          this._rename(el.dataset.id, e.target.value);
+        if (e.key === "Escape") {
+          cancelled = true;
+          el.blur();
         }
       });
+      el.addEventListener("blur", (e) => {
+        if (!el.isConnected) return; // removed by a re-render, not a real blur
+        this._editingName = null;
+        const device = this._devices.find((d) => d.id === el.dataset.id);
+        if (!cancelled && device && e.target.value !== device.name) {
+          this._rename(el.dataset.id, e.target.value);
+        } else {
+          this._render();
+        }
+      });
+      el.focus();
+      el.select();
     });
 
     root.querySelectorAll('[data-action="reboot"]').forEach((el) =>
@@ -771,6 +799,23 @@ const STYLE = `
     color: inherit;
     width: 160px;
   }
+  .name-cell { display: inline-flex; align-items: center; gap: 4px; }
+  .name-link {
+    color: var(--primary-color, #03a9f4);
+    text-decoration: none;
+    padding: 6px 0;
+  }
+  .name-link:hover { text-decoration: underline; }
+  .name-edit {
+    border: none;
+    background: transparent;
+    color: var(--secondary-text-color, #727272);
+    cursor: pointer;
+    padding: 2px 4px;
+    opacity: 0;
+  }
+  tr:hover .name-edit, .name-edit:focus { opacity: 1; }
+  .name-edit:disabled { visibility: hidden; }
   .name-input:hover, .name-input:focus {
     border-color: var(--divider-color, #e0e0e0);
     background: var(--secondary-background-color, #f5f5f5);
