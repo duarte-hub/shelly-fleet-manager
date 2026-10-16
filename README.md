@@ -33,6 +33,13 @@ firmware fleet updates and schedules — all editable in bulk from one table.
       settings as JSON, edit offline, and re-apply per-device or in bulk
 - [x] Reboot and **Clear Zigbee network** (`Shelly.ZigbeeClear`, Gen3+
       dual-protocol devices only), per-device or batched across a selection
+- [x] Wi-Fi signal (RSSI) column, read live from each device on every poll;
+      click a device's name to open its own web UI
+- [x] **Maintenance** tab: configurable status-poll interval (or manual-only,
+      via the Refresh button, which always re-polls every device), and
+      **scheduled reboots** — pick devices, time, weekdays and a delay between
+      each device's reboot so the fleet doesn't drop off at once. Schedules run
+      in HA (HA's time zone) and show each run's result
 - [x] HA services (`shelly_fleet.set_feature`, `.batch_set_feature`,
       `.apply_config`, `.batch_apply_config`, `.reboot`, `.zigbee_clear`,
       `.batch_zigbee_clear`) so automations/scripts can drive the same actions

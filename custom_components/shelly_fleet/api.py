@@ -8,7 +8,7 @@ from homeassistant.components import websocket_api
 from homeassistant.core import HomeAssistant, callback
 
 from . import rpc_client as rpc
-from .const import DOMAIN, TOGGLE_FEATURES
+from .const import DOMAIN, MIN_POLL_INTERVAL, TOGGLE_FEATURES
 from .discovery import async_discover_ips
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,6 +21,18 @@ DEVICE_CONFIG_SCHEMA = vol.Schema(
 )
 
 BATCH_CONFIG_SCHEMA = vol.Schema({vol.Optional(feature): bool for feature in TOGGLE_FEATURES})
+
+REBOOT_SCHEDULE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("id"): str,
+        vol.Required("name"): vol.All(str, vol.Length(min=1)),
+        vol.Required("enabled"): bool,
+        vol.Required("time"): vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$"),
+        vol.Required("days"): vol.All([vol.All(int, vol.Range(min=0, max=6))], vol.Length(min=1)),
+        vol.Required("device_ids"): vol.All([str], vol.Length(min=1)),
+        vol.Required("stagger_seconds"): vol.All(int, vol.Range(min=0, max=3600)),
+    }
+)
 
 
 def _get_data(hass: HomeAssistant) -> dict:
@@ -48,6 +60,11 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_zigbee_clear)
     websocket_api.async_register_command(hass, ws_batch_zigbee_clear)
     websocket_api.async_register_command(hass, ws_refresh)
+    websocket_api.async_register_command(hass, ws_get_maintenance)
+    websocket_api.async_register_command(hass, ws_set_poll_interval)
+    websocket_api.async_register_command(hass, ws_save_reboot_schedule)
+    websocket_api.async_register_command(hass, ws_delete_reboot_schedule)
+    websocket_api.async_register_command(hass, ws_run_reboot_schedule)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "shelly_fleet/list_devices"})
@@ -347,6 +364,69 @@ async def ws_batch_zigbee_clear(hass, connection, msg):
 @websocket_api.websocket_command({vol.Required("type"): "shelly_fleet/refresh"})
 @websocket_api.async_response
 async def ws_refresh(hass, connection, msg):
+    """Re-poll every device now (not the debounced request_refresh), so the
+    panel's Refresh button always returns live status, RSSI included."""
     data = _get_data(hass)
-    await data["coordinator"].async_request_refresh()
+    await data["coordinator"].async_refresh()
     connection.send_result(msg["id"], {"devices": list(data["coordinator"].data.values())})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "shelly_fleet/get_maintenance"})
+@websocket_api.async_response
+async def ws_get_maintenance(hass, connection, msg):
+    connection.send_result(msg["id"], _get_data(hass)["maintenance"].as_dict())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "shelly_fleet/set_poll_interval",
+        vol.Required("seconds"): vol.All(
+            int, vol.Any(0, vol.Range(min=MIN_POLL_INTERVAL, max=86400))
+        ),
+    }
+)
+@websocket_api.async_response
+async def ws_set_poll_interval(hass, connection, msg):
+    maintenance = _get_data(hass)["maintenance"]
+    await maintenance.async_set_poll_interval(msg["seconds"])
+    connection.send_result(msg["id"], maintenance.as_dict())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "shelly_fleet/save_reboot_schedule",
+        vol.Required("schedule"): REBOOT_SCHEDULE_SCHEMA,
+    }
+)
+@websocket_api.async_response
+async def ws_save_reboot_schedule(hass, connection, msg):
+    maintenance = _get_data(hass)["maintenance"]
+    schedule_id = await maintenance.async_save_schedule(msg["schedule"])
+    connection.send_result(msg["id"], {"id": schedule_id})
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "shelly_fleet/delete_reboot_schedule", vol.Required("schedule_id"): str}
+)
+@websocket_api.async_response
+async def ws_delete_reboot_schedule(hass, connection, msg):
+    await _get_data(hass)["maintenance"].async_delete_schedule(msg["schedule_id"])
+    connection.send_result(msg["id"])
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {vol.Required("type"): "shelly_fleet/run_reboot_schedule", vol.Required("schedule_id"): str}
+)
+@websocket_api.async_response
+async def ws_run_reboot_schedule(hass, connection, msg):
+    """Kick off a schedule immediately; returns before the (staggered) run ends."""
+    try:
+        _get_data(hass)["maintenance"].async_run_now(msg["schedule_id"])
+    except KeyError:
+        connection.send_error(msg["id"], "not_found", "Unknown schedule")
+        return
+    connection.send_result(msg["id"])

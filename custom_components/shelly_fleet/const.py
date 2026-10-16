@@ -6,6 +6,7 @@ PLATFORMS: list[str] = []
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}_devices"
+MAINTENANCE_STORAGE_KEY = f"{DOMAIN}_maintenance"
 
 PANEL_URL = "shelly-fleet-panel"
 PANEL_TITLE = "Shelly Fleet"
@@ -19,7 +20,8 @@ CONF_NAME = "name"
 CONF_USERNAME = "username"
 CONF_PASSWORD = "password"
 
-DEFAULT_POLL_INTERVAL = 15  # seconds
+DEFAULT_POLL_INTERVAL = 15  # seconds; user-configurable from the Maintenance tab
+MIN_POLL_INTERVAL = 5  # seconds; 0 is also allowed, meaning manual refresh only
 
 # Device-level config features exposed for inline edit + batch toggling.
 # Each maps to a Shelly RPC component/config path.

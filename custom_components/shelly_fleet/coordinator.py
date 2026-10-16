@@ -44,9 +44,13 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         )
         self.store = store
         self._session = aiohttp.ClientSession()
-        hass.bus.async_listen_once(
-            "homeassistant_stop", lambda _event: hass.async_create_task(self._session.close())
-        )
+
+        # A coroutine listener runs on the event loop; a plain lambda would be
+        # run in an executor thread, where hass.async_create_task is unsafe.
+        async def _close_session(_event) -> None:
+            await self._session.close()
+
+        hass.bus.async_listen_once("homeassistant_stop", _close_session)
 
     @property
     def session(self) -> aiohttp.ClientSession:
@@ -72,11 +76,12 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
         client = self.client_for(entry)
         try:
             info = await rpc.get_device_info(client)
-            sys_cfg, cloud_cfg, mqtt_cfg, ble_cfg = await asyncio.gather(
+            sys_cfg, cloud_cfg, mqtt_cfg, ble_cfg, wifi_status = await asyncio.gather(
                 rpc.get_sys_config(client),
                 rpc.get_cloud_config(client),
                 rpc.get_mqtt_config(client),
                 rpc.get_ble_config(client),
+                self._optional(rpc.get_wifi_status(client)),
             )
         except rpc.ShellyAuthRequired:
             return {
@@ -113,7 +118,18 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
             "cloud": bool(cloud_cfg.get("enable", False)),
             "mqtt": bool(mqtt_cfg.get("enable", False)),
             "ble": bool(ble_cfg.get("enable", False)),
+            "rssi": wifi_status.get("rssi"),
+            "ssid": wifi_status.get("ssid"),
         }
+
+    @staticmethod
+    async def _optional(coro) -> dict[str, Any]:
+        """Await a status read whose failure shouldn't mark the device offline
+        (e.g. a Wi-Fi-less, Ethernet-only model rejecting Wifi.GetStatus)."""
+        try:
+            return await coro or {}
+        except rpc.ShellyRpcError:
+            return {}
 
     @staticmethod
     async def _apply_feature(client: rpc.ShellyRpcClient, feature: str, value: bool) -> None:

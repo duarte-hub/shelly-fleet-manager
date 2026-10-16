@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from . import api, services
 from .const import DOMAIN
 from .coordinator import ShellyFleetCoordinator
+from .maintenance import MaintenanceManager
 from .panel import async_register_panel
 from .store import DeviceStore
 
@@ -22,10 +23,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await store.async_load()
 
     coordinator = ShellyFleetCoordinator(hass, store)
+    maintenance = MaintenanceManager(hass, coordinator)
+    await maintenance.async_load()
     await coordinator.async_config_entry_first_refresh()
+    maintenance.async_start()
 
     domain_data = hass.data.setdefault(DOMAIN, {})
-    domain_data[entry.entry_id] = {"store": store, "coordinator": coordinator}
+    domain_data[entry.entry_id] = {
+        "store": store,
+        "coordinator": coordinator,
+        "maintenance": maintenance,
+    }
 
     if not domain_data.get("_panel_registered"):
         await async_register_panel(hass)
@@ -44,6 +52,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     domain_data = hass.data.get(DOMAIN, {})
     data = domain_data.pop(entry.entry_id, None)
     if data:
+        data["maintenance"].async_stop()
         await data["coordinator"].async_shutdown()
     services.async_unregister_services(hass)
     return True

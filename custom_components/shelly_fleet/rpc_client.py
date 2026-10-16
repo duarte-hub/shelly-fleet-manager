@@ -172,6 +172,12 @@ async def get_ble_config(client: ShellyRpcClient) -> dict[str, Any]:
     return await client.call("BLE.GetConfig")
 
 
+async def get_wifi_status(client: ShellyRpcClient) -> dict[str, Any]:
+    """Wifi.GetStatus carries the live ``rssi`` (dBm) while connected as a
+    station; it's absent when the device is on Ethernet or in AP-only mode."""
+    return await client.call("Wifi.GetStatus")
+
+
 async def set_sys_config(client: ShellyRpcClient, config: dict[str, Any]) -> Any:
     return await client.call("Sys.SetConfig", {"config": config})
 
