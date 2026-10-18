@@ -16,7 +16,7 @@ const FEATURES = [
 
 // Must match "version" in manifest.json (CI checks this). Compared against the
 // backend's version to detect a stale cached copy of this file after an update.
-const PANEL_VERSION = "0.4.0";
+const PANEL_VERSION = "0.5.0";
 
 // Original drawn thumbnails per device family (not Shelly product photos —
 // see README "Branding"). Users can override with their own photos; the
@@ -98,6 +98,9 @@ class ShellyFleetPanel extends HTMLElement {
     this._maintenance = null; // { poll_interval, time_zone, reboot_schedules }
     this._tab = "devices"; // "devices" | "maintenance"
     this._scheduleDraft = null; // reboot schedule being created/edited in the dialog
+    this._firmware = null; // { last_check, checking, devices: { id: {stable, beta, updating, ...} } }
+    this._fwStage = "stable"; // update channel picked on the Maintenance tab
+    this._fwChecking = false;
     this._refreshing = false;
     this._selected = new Set();
     this._editingName = null; // device id whose name is being edited
@@ -140,10 +143,12 @@ class ShellyFleetPanel extends HTMLElement {
 
   async _refresh() {
     try {
-      const [devices, maintenance] = await Promise.all([
+      const [devices, maintenance, firmware] = await Promise.all([
         this._callWS({ type: "shelly_fleet/list_devices" }),
         this._callWS({ type: "shelly_fleet/get_maintenance" }),
+        this._callWS({ type: "shelly_fleet/get_firmware" }),
       ]);
+      this._firmware = firmware;
       this._devices = devices.devices || [];
       this._backendVersion = devices.version || null;
       this._maintenance = maintenance;
@@ -226,6 +231,48 @@ class ShellyFleetPanel extends HTMLElement {
       this._error = `Failed to start schedule: ${err.message || err}`;
     }
     await this._refresh();
+  }
+
+  async _checkFirmware() {
+    this._fwChecking = true;
+    this._render();
+    try {
+      this._firmware = await this._callWS({ type: "shelly_fleet/check_firmware" });
+    } catch (err) {
+      this._error = `Firmware check failed: ${err.message || err}`;
+    }
+    this._fwChecking = false;
+    this._render();
+  }
+
+  async _updateFirmware(deviceIds) {
+    if (deviceIds.length === 0) return;
+    const stage = this._fwStage;
+    const what = deviceIds.length === 1
+      ? `"${this._devices.find((d) => d.id === deviceIds[0])?.name || deviceIds[0]}"`
+      : `${deviceIds.length} devices`;
+    if (!confirm(`Install the ${stage} firmware on ${what}? Each device reboots when its update is installed (usually 1–3 minutes).`)) return;
+    try {
+      const result = await this._callWS({ type: "shelly_fleet/update_firmware", device_ids: deviceIds, stage });
+      this._firmware = result;
+      const failed = Object.entries(result.results || {}).filter(([, r]) => !r.ok);
+      if (failed.length > 0) {
+        const name = (id) => this._devices.find((d) => d.id === id)?.name || id;
+        this._error = `Firmware update failed to start on ${failed.length} device(s): ${failed
+          .map(([id, r]) => `${name(id)} (${r.error})`)
+          .join(", ")}`;
+      }
+    } catch (err) {
+      this._error = `Firmware update failed: ${err.message || err}`;
+    }
+    this._render();
+  }
+
+  /** Firmware state for one device, plus whether it can be updated on the chosen channel. */
+  _fwInfo(device) {
+    const info = this._firmware?.devices?.[device.id] || {};
+    const available = info[this._fwStage] || null;
+    return { info, available, updatable: !!(device.online && available && !info.updating) };
   }
 
   _findSchedule(scheduleId) {
@@ -597,7 +644,12 @@ class ShellyFleetPanel extends HTMLElement {
         <td>${escapeHtml(device.ip || "")}</td>
         <td>${escapeHtml(device.model || "-")}</td>
         <td>${device.gen != null ? "Gen" + device.gen : "-"}</td>
-        <td>${escapeHtml(device.fw_version || "-")}</td>
+        <td>
+          ${escapeHtml(device.fw_version || "-")}
+          ${this._fwInfo(device).available
+            ? `<span class="fw-badge" title="${escapeAttr(`Firmware ${this._fwInfo(device).available} available (Maintenance tab)`)}">↑</span>`
+            : ""}
+        </td>
         <td>${this._renderRssi(device)}</td>
         ${FEATURES.map((f) => `<td>${this._renderFeatureCell(device, f)}</td>`).join("")}
         <td class="actions">
@@ -741,6 +793,85 @@ class ShellyFleetPanel extends HTMLElement {
       </div>`;
   }
 
+  _renderFirmwareCard() {
+    const fw = this._firmware || { devices: {} };
+    const stage = this._fwStage;
+    const rank = (d) => {
+      const { info, updatable } = this._fwInfo(d);
+      return updatable ? 0 : info.updating ? 1 : 2;
+    };
+    const devices = [...this._devices].sort(
+      (a, b) => rank(a) - rank(b) || String(a.name).localeCompare(String(b.name))
+    );
+    const updatable = devices.filter((d) => this._fwInfo(d).updatable);
+    const busy = this._fwChecking || fw.checking;
+
+    const statusCell = (d) => {
+      const { info, available } = this._fwInfo(d);
+      if (info.updating) return `<span class="running">Updating to ${escapeHtml(info.updating.target)}…</span>`;
+      if (!d.online) return `<span class="muted">Offline</span>`;
+      if (info.update_error) return `<span class="result-bad" title="${escapeAttr(info.update_error)}">Update failed</span>`;
+      if (info.error) return `<span class="result-bad" title="${escapeAttr(info.error)}">Check failed</span>`;
+      if (!info.checked) return `<span class="muted">Not checked</span>`;
+      if (available) return `<span class="fw-available">${escapeHtml(available)} available</span>`;
+      return `<span class="result-ok">Up to date</span>`;
+    };
+
+    const rows = devices
+      .map(
+        (d) => `
+        <tr>
+          <td class="thumb-cell">${this._renderThumb(d)}</td>
+          <td>${escapeHtml(d.name || d.id)}</td>
+          <td>${escapeHtml(d.fw_version || "-")}</td>
+          <td>${statusCell(d)}</td>
+          <td>
+            ${this._fwInfo(d).updatable
+              ? `<button data-action="fw-update" data-id="${escapeAttr(d.id)}">Update</button>`
+              : ""}
+          </td>
+        </tr>`
+      )
+      .join("");
+
+    return `
+      <section class="card">
+        <div class="card-header">
+          <h2>Firmware</h2>
+          <div class="spacer"></div>
+          <label class="inline">
+            Channel
+            <select data-action="fw-stage">
+              <option value="stable" ${stage === "stable" ? "selected" : ""}>Stable</option>
+              <option value="beta" ${stage === "beta" ? "selected" : ""}>Beta</option>
+            </select>
+          </label>
+          <button data-action="fw-check" ${busy ? "disabled" : ""}>${busy ? "Checking…" : "Check for updates"}</button>
+          <button class="primary" data-action="fw-update-all" ${updatable.length === 0 ? "disabled" : ""}>
+            Update all${updatable.length ? ` (${updatable.length})` : ""}
+          </button>
+        </div>
+        <p class="hint">
+          ${fw.last_check
+            ? `Last checked ${escapeHtml(new Date(fw.last_check).toLocaleString())}.`
+            : "Not checked since Home Assistant started."}
+          Devices need internet access to check for and download updates, and each one
+          reboots once its update is installed.
+        </p>
+        ${devices.length === 0
+          ? `<div class="empty">No devices yet.</div>`
+          : `
+          <div class="table-wrap">
+            <table class="firmware">
+              <thead>
+                <tr><th></th><th>Device</th><th>Installed</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>`}
+      </section>`;
+  }
+
   _renderMaintenanceTab() {
     const m = this._maintenance;
     if (!m) return `<div class="empty">Loading…</div>`;
@@ -805,6 +936,8 @@ class ShellyFleetPanel extends HTMLElement {
           </select>
         </label>
       </section>
+
+      ${this._renderFirmwareCard()}
 
       <section class="card">
         <div class="card-header">
@@ -1051,6 +1184,17 @@ class ShellyFleetPanel extends HTMLElement {
     );
 
     // --- Maintenance tab ---
+    root.querySelector('[data-action="fw-stage"]')?.addEventListener("change", (e) => {
+      this._fwStage = e.target.value;
+      this._render();
+    });
+    root.querySelector('[data-action="fw-check"]')?.addEventListener("click", () => this._checkFirmware());
+    root.querySelector('[data-action="fw-update-all"]')?.addEventListener("click", () =>
+      this._updateFirmware(this._devices.filter((d) => this._fwInfo(d).updatable).map((d) => d.id))
+    );
+    root.querySelectorAll('[data-action="fw-update"]').forEach((el) =>
+      el.addEventListener("click", () => this._updateFirmware([el.dataset.id]))
+    );
     root.querySelector('[data-action="poll-interval"]')?.addEventListener("change", (e) =>
       this._setPollInterval(Number(e.target.value))
     );
@@ -1304,7 +1448,7 @@ const STYLE = `
     margin-bottom: 16px;
   }
   .card h2 { font-size: 18px; font-weight: 400; margin: 0 0 4px; }
-  .card-header { display: flex; align-items: center; gap: 12px; }
+  .card-header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .card .table-wrap { margin-top: 8px; }
   .card .empty { padding: 24px; }
   label.inline { display: inline-flex; align-items: center; gap: 10px; }
@@ -1313,6 +1457,17 @@ const STYLE = `
   .running { color: var(--primary-color, #03a9f4); }
   .result-ok { color: #4caf50; margin-left: 6px; }
   .result-bad { color: var(--error-color, #db4437); margin-left: 6px; cursor: help; }
+
+  table.firmware { min-width: 560px; }
+  table.firmware .result-ok, table.firmware .result-bad { margin-left: 0; }
+  table.firmware button { padding: 4px 10px; }
+  .fw-available { color: var(--primary-color, #03a9f4); font-weight: 500; }
+  .fw-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; margin-left: 4px; border-radius: 50%;
+    background: var(--primary-color, #03a9f4); color: var(--text-primary-color, #fff);
+    font-size: 11px; font-weight: 700; cursor: help;
+  }
 
   .rssi { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
   .rssi .bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 13px; }

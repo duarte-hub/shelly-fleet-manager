@@ -183,6 +183,16 @@ class ShellyFleetCoordinator(DataUpdateCoordinator[dict[str, dict[str, Any]]]):
     async def async_reboot(self, device_id: str) -> None:
         await rpc.reboot(self.client_for(self._entry_or_raise(device_id)))
 
+    async def async_check_for_update(self, device_id: str) -> dict[str, Any]:
+        """Ask the device to query Shelly's update server. The result only has
+        ``stable`` / ``beta`` keys (each ``{"version", "build_id"}``) when that
+        channel offers something newer than what's installed."""
+        return await rpc.check_for_update(self.client_for(self._entry_or_raise(device_id))) or {}
+
+    async def async_update_firmware(self, device_id: str, stage: str) -> None:
+        """Start an OTA update; the device downloads it and reboots on its own."""
+        await rpc.update_firmware(self.client_for(self._entry_or_raise(device_id)), stage)
+
     async def async_zigbee_clear(self, device_id: str) -> None:
         await rpc.zigbee_clear(self.client_for(self._entry_or_raise(device_id)))
 

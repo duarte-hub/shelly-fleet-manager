@@ -11,6 +11,7 @@ from homeassistant.loader import async_get_integration
 from . import rpc_client as rpc
 from .const import DOMAIN, MIN_POLL_INTERVAL, TOGGLE_FEATURES
 from .discovery import async_discover_ips
+from .firmware import STAGES
 from .photos import async_attach_photo_urls
 
 _LOGGER = logging.getLogger(__name__)
@@ -67,6 +68,9 @@ def async_register_websocket_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_save_reboot_schedule)
     websocket_api.async_register_command(hass, ws_delete_reboot_schedule)
     websocket_api.async_register_command(hass, ws_run_reboot_schedule)
+    websocket_api.async_register_command(hass, ws_get_firmware)
+    websocket_api.async_register_command(hass, ws_check_firmware)
+    websocket_api.async_register_command(hass, ws_update_firmware)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "shelly_fleet/list_devices"})
@@ -442,3 +446,40 @@ async def ws_run_reboot_schedule(hass, connection, msg):
         connection.send_error(msg["id"], "not_found", "Unknown schedule")
         return
     connection.send_result(msg["id"])
+
+
+@websocket_api.websocket_command({vol.Required("type"): "shelly_fleet/get_firmware"})
+@websocket_api.async_response
+async def ws_get_firmware(hass, connection, msg):
+    connection.send_result(msg["id"], _get_data(hass)["firmware"].as_dict())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "shelly_fleet/check_firmware",
+        vol.Optional("device_ids"): [str],
+    }
+)
+@websocket_api.async_response
+async def ws_check_firmware(hass, connection, msg):
+    """Ask devices (default: all online) whether newer firmware is on offer."""
+    firmware = _get_data(hass)["firmware"]
+    await firmware.async_check(msg.get("device_ids"))
+    connection.send_result(msg["id"], firmware.as_dict())
+
+
+@websocket_api.require_admin
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "shelly_fleet/update_firmware",
+        vol.Required("device_ids"): vol.All([str], vol.Length(min=1)),
+        vol.Optional("stage", default="stable"): vol.In(STAGES),
+    }
+)
+@websocket_api.async_response
+async def ws_update_firmware(hass, connection, msg):
+    """Start OTA updates; returns once each device has accepted (or refused) it."""
+    firmware = _get_data(hass)["firmware"]
+    results = await firmware.async_update(msg["device_ids"], msg["stage"])
+    connection.send_result(msg["id"], {"results": results, **firmware.as_dict()})

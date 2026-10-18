@@ -16,10 +16,10 @@ HA's built-in `shelly` integration already gives you switch/light/cover/sensor
 entities for control and automation. This addon does **not** duplicate that.
 Instead it talks directly to each device's JSON-RPC API for the device-level
 settings core HA doesn't expose as entities: eco mode, cloud connectivity,
-MQTT, BLE, mDNS discoverability, naming, reboot, and (in later phases)
-firmware fleet updates and schedules — all editable in bulk from one table.
+MQTT, BLE, mDNS discoverability, naming, reboot, plus
+firmware fleet updates and scheduled reboots — all editable in bulk from one table.
 
-## Current status: Phase 1
+## Current status
 
 - [x] Add devices by IP, or discover them via mDNS network scan — with an
       **Add All** button to register every discovered device in one click
@@ -45,7 +45,10 @@ firmware fleet updates and schedules — all editable in bulk from one table.
 - [x] HA services (`shelly_fleet.set_feature`, `.batch_set_feature`,
       `.apply_config`, `.batch_apply_config`, `.reboot`, `.zigbee_clear`,
       `.batch_zigbee_clear`) so automations/scripts can drive the same actions
-- [ ] Phase 2: firmware fleet view + one-click OTA updates across devices
+- [x] **Firmware** (Maintenance tab): check every device for updates on the
+      stable or beta channel, then update one device or all of them in one
+      click. Progress is tracked until each device comes back on the new
+      version, and the Devices tab flags devices that have an update
 - [ ] Phase 3: schedules (list/create/delete) per device
 
 ## Requirements
