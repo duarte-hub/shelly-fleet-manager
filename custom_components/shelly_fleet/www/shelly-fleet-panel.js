@@ -16,7 +16,7 @@ const FEATURES = [
 
 // Must match "version" in manifest.json (CI checks this). Compared against the
 // backend's version to detect a stale cached copy of this file after an update.
-const PANEL_VERSION = "0.5.0";
+const PANEL_VERSION = "0.5.1";
 
 // Original drawn thumbnails per device family (not Shelly product photos —
 // see README "Branding"). Users can override with their own photos; the
@@ -601,7 +601,7 @@ class ShellyFleetPanel extends HTMLElement {
   _renderRssi(device) {
     if (!device.online || device.rssi == null) return `<span class="muted">-</span>`;
     const rssi = device.rssi;
-    const bars = rssi >= -55 ? 4 : rssi >= -67 ? 3 : rssi >= -75 ? 2 : 1;
+    const bars = rssi >= -55 ? 4 : rssi >= -69 ? 3 : rssi >= -75 ? 2 : 1;
     const quality = ["", "Poor", "Fair", "Good", "Excellent"][bars];
     const title = `${quality} signal${device.ssid ? ` on ${device.ssid}` : ""}`;
     return `
