@@ -27,6 +27,9 @@ import aiohttp
 _LOGGER = logging.getLogger(__name__)
 
 RPC_TIMEOUT = 10
+# Shelly.CheckForUpdate makes the device query Shelly's update server before it
+# answers; that round trip is routinely 8-16 s, so it gets its own budget.
+UPDATE_CHECK_TIMEOUT = 45
 
 
 class ShellyAuthRequired(Exception):
@@ -71,7 +74,12 @@ class ShellyRpcClient:
     def _url(self) -> str:
         return f"http://{self.host}/rpc"
 
-    async def call(self, method: str, params: dict[str, Any] | None = None) -> Any:
+    async def call(
+        self,
+        method: str,
+        params: dict[str, Any] | None = None,
+        timeout: float = RPC_TIMEOUT,
+    ) -> Any:
         """Call an RPC method, transparently handling the auth challenge."""
         payload: dict[str, Any] = {"id": next(self._id_counter), "method": method}
         if params is not None:
@@ -79,7 +87,7 @@ class ShellyRpcClient:
         if self._auth_ctx is not None:
             payload["auth"] = self._build_auth_block()
 
-        data = await self._post(payload)
+        data = await self._post(payload, timeout)
 
         if "error" in data:
             error = data["error"]
@@ -88,7 +96,7 @@ class ShellyRpcClient:
                     raise ShellyAuthRequired(f"{self.host} requires authentication")
                 self._auth_ctx = self._parse_challenge(error.get("message", "{}"))
                 payload["auth"] = self._build_auth_block()
-                data = await self._post(payload)
+                data = await self._post(payload, timeout)
                 if "error" in data:
                     err = data["error"]
                     raise ShellyRpcError(err.get("code", -1), err.get("message", ""))
@@ -97,15 +105,21 @@ class ShellyRpcClient:
 
         return data.get("result")
 
-    async def _post(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _post(
+        self, payload: dict[str, Any], timeout: float = RPC_TIMEOUT
+    ) -> dict[str, Any]:
         try:
             async with self._session.post(
                 self._url,
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=RPC_TIMEOUT),
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
                 text = await resp.text()
-        except (aiohttp.ClientError, asyncio.TimeoutError) as err:
+        except asyncio.TimeoutError as err:
+            raise ShellyConnectionError(
+                f"No reply from {self.host} within {timeout:g} s"
+            ) from err
+        except aiohttp.ClientError as err:
             raise ShellyConnectionError(f"Cannot reach {self.host}: {err}") from err
 
         try:
@@ -199,7 +213,7 @@ async def reboot(client: ShellyRpcClient) -> Any:
 
 
 async def check_for_update(client: ShellyRpcClient) -> Any:
-    return await client.call("Shelly.CheckForUpdate")
+    return await client.call("Shelly.CheckForUpdate", timeout=UPDATE_CHECK_TIMEOUT)
 
 
 async def update_firmware(client: ShellyRpcClient, stage: str = "stable") -> Any:
